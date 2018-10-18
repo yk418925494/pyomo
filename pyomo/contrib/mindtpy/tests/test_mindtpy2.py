@@ -3,7 +3,7 @@ from math import fabs
 
 import pyomo.core.base.symbolic
 import pyutilib.th as unittest
-from pyomo.contrib.mindtpy.tests.MINLP_simple import SimpleMINLP
+from pyomo.contrib.mindtpy.tests.MINLP3_simple import SimpleMINLP
 from pyomo.environ import SolverFactory, value
 
 required_solvers = ('ipopt', 'gurobi')

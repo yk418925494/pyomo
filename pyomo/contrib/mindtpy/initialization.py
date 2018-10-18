@@ -89,8 +89,8 @@ def init_rNLP(solve_data, config):
         elif config.strategy == 'GBD':
             add_gbd_cut(solve_data, config)
         elif config.strategy == 'ECP':
-            add_ecp_cut(solve_data, config)
-            add_objective_linearization(m, solve_data, config)
+            add_ecp_cut(nlp_solution_values, dual_values, solve_data, config)
+            add_objective_linearization(solve_data, config)
     elif subprob_terminate_cond is tc.infeasible:
         # TODO fail? try something else?
         config.logger.info(

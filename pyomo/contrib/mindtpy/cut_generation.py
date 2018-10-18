@@ -65,29 +65,39 @@ def add_oa_cut(var_values, duals, solve_data, config):
                 MindtPy.nl_map[constr]] <= 0)
 
 
-def add_ecp_cut(solve_data, config):
-    m = solve_data.working_model
+def add_ecp_cut(var_values, duals, solve_data, config):
+    m = solve_data.mip
     MindtPy = m.MindtPy_utils
     MindtPy.MindtPy_linear_cuts.mip_iters.add(solve_data.mip_iter)
+
+    # Copy values over
+    for var, val in zip(MindtPy.var_list, var_values):
+        if val is not None and not var.fixed:
+            var.value = val
+
+    # Copy duals over
+    for constr, dual_value in zip(MindtPy.constraints, duals):
+        m.dual[constr] = dual_value
+
     # generate new constraints
     # TODO some kind of special handling if the dual is phenomenally small?
-    gen = (constr for constr in MindtPy.jacs
-           if (0 if constr.upper is None
-               else abs(value(constr.body) - constr.upper)) +
-           (0 if constr.lower is None
-            else abs(constr.lower - value(constr.body)))
-           > config.ECP_tolerance)
-    for constr in gen:
-        constr_dir = -1 if value(constr.upper) is None else 1
-        rhs = ((0 if constr.upper is None else constr.upper) +
-               (0 if constr.lower is None else constr.lower))
-        # this only happens if a constraint is >=
-        c = MindtPy.MindtPy_linear_cuts.ecp_cuts.add(
-            expr=copysign(1, constr_dir)
-            * (sum(value(MindtPy.jacs[constr][id(var)]) * (var - value(var))
-                   for var in list(EXPR.identify_variables(constr.body))) +
-               value(constr.body) - rhs) <= 0)
-        MindtPy.ECP_constr_map[constr, solve_data.mip_iter] = c
+    jacs = solve_data.jacobians
+    for constr in MindtPy.nonlinear_constraints:
+        if ((0 if constr.upper is None else abs(value(constr.body) - constr.upper)) +
+        (0 if constr.lower is None else abs(value(constr.body) - constr.lower)) ) > config.ECP_tolerance:
+            rhs = ((0 if constr.upper is None else constr.upper) +
+                   (0 if constr.lower is None else constr.lower))
+            MindtPy.MindtPy_linear_cuts.ecp_cuts.add(
+                expr=copysign(1, sign_adjust * m.dual[constr]) * (sum(
+                    value(jacs[constr][var]) * (var - value(var))
+                    for var in list(EXPR.identify_variables(constr.body))) +
+                    value(constr.body) - rhs)
+                    #  + MindtPy.MindtPy_linear_cuts.slack_vars[
+                    # solve_data.nlp_iter,
+                    # MindtPy.nl_map[constr]]
+                     <= 0)
+
+        # MindtPy.ECP_constr_map[constr, solve_data.mip_iter] = c
 
 
 def add_psc_cut(solve_data, config, nlp_feasible=True):
