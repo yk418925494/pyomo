@@ -33,6 +33,7 @@ from pyomo.core import (
 from pyomo.gdp import Disjunct, Disjunction, GDP_Error
 from pyomo.gdp.util import clone_without_expression_components, target_list
 from pyomo.gdp.plugins.gdp_var_mover import HACK_GDP_Disjunct_Reclassifier
+from pyomo.repn import generate_standard_repn
 
 from six import iteritems, iterkeys
 
@@ -110,7 +111,7 @@ class ConvexHull_Transformation(Transformation):
     ))
     CONFIG.declare('perspective function', cfg.ConfigValue(
         default='FurmanSawayaGrossmann',
-        domain=cfg.In(['FurmanSawayaGrossmann','LeeGrossmann','GrossmannLee']),
+        domain=cfg.In(['FurmanSawayaGrossmann','LeeGrossmann','GrossmannLee','SOCP']),
         description='perspective function used for variable disaggregation',
         doc="""
         The perspective function used for variable disaggregation
@@ -139,6 +140,16 @@ class ConvexHull_Transformation(Transformation):
             ((1-eps)*y_ik + eps) * h_ik( nu_ik/((1-eps)*y_ik + eps) ) \
                 - eps * h_ki(0) * ( 1-y_ik ) <= 0
 
+        "SOCP" is the second order cone reformulation used for the perspective
+        of quadratic constraints h_ik(x) = x'*Q_ik*x + b_ik*x + c_ik <= 0 [4].
+        It avoids the epsilon approximation and is conic representable by using:
+
+            x_k = sum ( nu_ik )
+            t_ik + b_ik*nu_ik + c_ik*y_ik <= 0
+            t_ik*y_ik >= nu_ik'*Q_ik*n_ik (SOCP representable)
+
+
+
         References
         ----------
         .. [1] Lee, S., & Grossmann, I. E. (2000). New algorithms for
@@ -153,6 +164,10 @@ class ConvexHull_Transformation(Transformation):
            useful algebraic representation of nonlinear disjunctive convex
            sets using the perspective function.  Optimization Online
            (2016). http://www.optimization-online.org/DB_HTML/2016/07/5544.html.
+
+        .. [4] [8] A. Ben-Tal and A. Nemirovski. Lectures on modern convex 
+           optimization: analysis, algorithms, and engineering applications.
+           SIAM, 2001.
         """
     ))
     CONFIG.declare('EPS', cfg.ConfigValue(
@@ -727,19 +742,20 @@ class ConvexHull_Transformation(Transformation):
             if not c.active:
                 continue
 
-            NL = c.body.polynomial_degree() not in (0,1)
+            NL = c.body.polynomial_degree() not in (0,1,2)
+            Q = c.body.polynomial_degree() == (2)
             EPS = self._config.EPS
             mode = self._config.perspective_function
 
             # We need to evaluate the expression at the origin *before*
             # we substitute the expression variables with the
             # disaggregated variables
-            if not NL or mode == "FurmanSawayaGrossmann":
+            if not NL or not Q or mode == "FurmanSawayaGrossmann":
                 h_0 = clone_without_expression_components(
                     c.body, substitute=zero_substitute_map)
 
             y = disjunct.indicator_var
-            if NL:
+            if NL or ( Q and not mode == "SOCP"):
                 if mode == "LeeGrossmann":
                     sub_expr = clone_without_expression_components(
                         c.body,
@@ -766,12 +782,34 @@ class ConvexHull_Transformation(Transformation):
                     expr = ((1-EPS)*y + EPS)*sub_expr - EPS*h_0*(1-y)
                 else:
                     raise RuntimeError("Unknown NL CHull mode")
+            elif Q and mode == "SOCP":
+                repn = generate_standard_repn(c.body)
+                quad_index = next(
+                    i for i, var_tup in enumerate(repn.quadratic_vars)
+                    if (var_tup[0] is var_tup[1])
+                    )
+                bilinear_index = next(
+                    j for j, var_tup in enumerate(repn.quadratic_vars)
+                    if (var_tup[0] is not var_tup[1])
+                    )
+                print(repn.quadratic_vars)
+                if bilinear_index:
+                    raise RuntimeError("Unable to do SOCP formulation with bilinear terms")
+                    # TODO: We have to write the theory and check this
+
+                sub_expr = clone_without_expression_components(
+                    c.body,
+                    substitute=dict(
+                        (var, subs/((1 - EPS)*y + EPS))
+                        for var, subs in iteritems(var_substitute_map) )
+                )
+                expr = ((1-EPS)*y + EPS)*sub_expr - EPS*h_0*(1-y)
             else:
                 expr = clone_without_expression_components(
                     c.body, substitute=var_substitute_map)
 
             if c.equality:
-                if NL:
+                if NL or Q:
                     newConsExpr = expr == c.lower*y
                 else:
                     v = list(EXPR.identify_variables(expr))
@@ -797,7 +835,7 @@ class ConvexHull_Transformation(Transformation):
                 if __debug__ and logger.isEnabledFor(logging.DEBUG):
                     logger.debug("GDP(cHull): Transforming constraint " +
                                  "'%s'", c.name)
-                if NL:
+                if NL or Q:
                     newConsExpr = expr >= c.lower*y
                 else:
                     newConsExpr = expr - (1-y)*h_0 >= c.lower*y
@@ -811,7 +849,7 @@ class ConvexHull_Transformation(Transformation):
                 if __debug__ and logger.isEnabledFor(logging.DEBUG):
                     logger.debug("GDP(cHull): Transforming constraint " +
                                  "'%s'", c.name)
-                if NL:
+                if NL or Q:
                     newConsExpr = expr <= c.upper*y
                 else:
                     newConsExpr = expr - (1-y)*h_0 <= c.upper*y

@@ -161,8 +161,8 @@ class TwoTermDisj(unittest.TestCase):
             "_pyomo_gdp_chull_relaxation.relaxedDisjuncts[0].x*"
             "(1/(%s*d[0].indicator_var + %s)) + "
             "(_pyomo_gdp_chull_relaxation.relaxedDisjuncts[0].y*"
-            "(1/(%s*d[0].indicator_var + %s)))**2) - "
-            "%s*(0.0 + 0.0**2)*(1 - d[0].indicator_var) "
+            "(1/(%s*d[0].indicator_var + %s)))**4) - "
+            "%s*(0.0 + 0.0**4)*(1 - d[0].indicator_var) "
             "- 14.0*d[0].indicator_var"
             % (EPS_1, EPS, EPS_1, EPS, EPS_1, EPS, EPS))
 
