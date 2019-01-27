@@ -785,17 +785,37 @@ class ConvexHull_Transformation(Transformation):
             elif Q and mode == "SOCP":
                 repn = generate_standard_repn(c.body)
                 quad_index = next(
-                    i for i, var_tup in enumerate(repn.quadratic_vars)
-                    if (var_tup[0] is var_tup[1])
-                    )
+                    (i for i, var_tup in enumerate(repn.quadratic_vars)
+                    if (var_tup[0] is var_tup[1]) ), None )
                 bilinear_index = next(
-                    j for j, var_tup in enumerate(repn.quadratic_vars)
-                    if (var_tup[0] is not var_tup[1])
-                    )
-                print(repn.quadratic_vars)
+                    (j for j, var_tup in enumerate(repn.quadratic_vars)
+                    if (var_tup[0] is not var_tup[1]) ), None )
+                print(quad_index)
                 if bilinear_index:
                     raise RuntimeError("Unable to do SOCP formulation with bilinear terms")
                     # TODO: We have to write the theory and check this
+
+                # Add extra positive lifting variable of the quadratic terms
+                lifting_var = disjunct.lifting_var = Var(within=PositiveReal)
+
+                
+                expr = lifting_var + sum(coef * repn.linear_vars[i]
+                    for i, coef in enumerate(repn.linear_coefs))
+
+
+                bilinear_constr.set_value((
+                        bilinear_constr.lower,
+                        sum(coef * repn.linear_vars[i]
+                            for i, coef in enumerate(repn.linear_coefs)) +
+                        repn.quadratic_coefs[replace_index] * sum(
+                            val * blk.v_increment[val] for val in blk.valid_values) +
+                        sum(repn.quadratic_coefs[i] * var_tup[0] * var_tup[1]
+                            for i, var_tup in enumerate(repn.quadratic_vars)
+                            if not i == replace_index) +
+                        repn.constant +
+                        zero_if_None(repn.nonlinear_expr),
+                        bilinear_constr.upper
+                    ))
 
                 sub_expr = clone_without_expression_components(
                     c.body,
