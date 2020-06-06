@@ -93,14 +93,14 @@ def init_rNLP(solve_data, config):
             % (solve_data.nlp_iter, value(main_objective.expr),
                solve_data.LB, solve_data.UB))
         if config.strategy == 'OA':
-            copy_var_list_values(m.MindtPy_utils.variable_list,
-                                 solve_data.mip.MindtPy_utils.variable_list,
-                                 config, ignore_integrality=True)
-            add_oa_cuts(solve_data.mip, dual_values, solve_data, config)
-            # TODO check if value of the binary or integer varibles is 0/1 or integer value.
-            for var in solve_data.mip.component_data_objects(ctype=Var):
-                if var.is_integer():
-                    var.value = int(round(var.value))
+            add_oa_cut(nlp_solution_values, dual_values, solve_data, config)
+        elif config.strategy == 'PSC':
+            add_psc_cut(solve_data, config)
+        elif config.strategy == 'GBD':
+            add_gbd_cut(solve_data, config)
+        elif config.strategy == 'ECP':
+            add_ecp_cut(nlp_solution_values, dual_values, solve_data, config)
+            add_objective_linearization(solve_data, config)
     elif subprob_terminate_cond is tc.infeasible:
         # TODO fail? try something else?
         config.logger.info(

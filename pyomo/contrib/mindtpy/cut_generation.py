@@ -32,11 +32,77 @@ def add_objective_linearization(solve_data, config):
         MindtPy.ECP_constr_map[obj, solve_data.mip_iter] = c
 
 
-def add_oa_cuts(target_model, dual_values, solve_data, config,
-                linearize_active=True,
-                linearize_violated=True,
-                linearize_inactive=False):
-    """Linearizes nonlinear constraints.
+def add_oa_cut(var_values, duals, solve_data, config):
+    m = solve_data.mip
+    MindtPy = m.MindtPy_utils
+    MindtPy.MindtPy_linear_cuts.nlp_iters.add(solve_data.nlp_iter)
+    sign_adjust = -1 if MindtPy.objective.sense == minimize else 1
+
+    # Copy values over
+    for var, val in zip(MindtPy.var_list, var_values):
+        if val is not None and not var.fixed:
+            var.value = val
+
+    # Copy duals over
+    for constr, dual_value in zip(MindtPy.constraints, duals):
+        m.dual[constr] = dual_value
+
+    # generate new constraints
+    # TODO some kind of special handling if the dual is phenomenally small?
+    jacs = solve_data.jacobians
+    for constr in MindtPy.nonlinear_constraints:
+        rhs = ((0 if constr.upper is None else constr.upper) +
+               (0 if constr.lower is None else constr.lower))
+        MindtPy.MindtPy_linear_cuts.oa_cuts.add(
+            expr=copysign(1, sign_adjust * m.dual[constr]) * (sum(
+                value(jacs[constr][var]) * (var - value(var))
+                for var in list(EXPR.identify_variables(constr.body))) +
+                value(constr.body) - rhs) +
+            MindtPy.MindtPy_linear_cuts.slack_vars[
+                solve_data.nlp_iter,
+                MindtPy.nl_map[constr]] <= 0)
+
+
+def add_ecp_cut(var_values, duals, solve_data, config):
+    m = solve_data.mip
+    MindtPy = m.MindtPy_utils
+    MindtPy.MindtPy_linear_cuts.mip_iters.add(solve_data.mip_iter)
+
+    # Copy values over
+    for var, val in zip(MindtPy.var_list, var_values):
+        if val is not None and not var.fixed:
+            var.value = val
+
+    # Copy duals over
+    for constr, dual_value in zip(MindtPy.constraints, duals):
+        m.dual[constr] = dual_value
+
+    # generate new constraints
+    # TODO some kind of special handling if the dual is phenomenally small?
+    jacs = solve_data.jacobians
+    for constr in MindtPy.nonlinear_constraints:
+        if ((0 if constr.upper is None else abs(value(constr.body) - constr.upper)) +
+        (0 if constr.lower is None else abs(value(constr.body) - constr.lower)) ) > config.ECP_tolerance:
+            rhs = ((0 if constr.upper is None else constr.upper) +
+                   (0 if constr.lower is None else constr.lower))
+            MindtPy.MindtPy_linear_cuts.ecp_cuts.add(
+                expr=copysign(1, sign_adjust * m.dual[constr]) * (sum(
+                    value(jacs[constr][var]) * (var - value(var))
+                    for var in list(EXPR.identify_variables(constr.body))) +
+                    value(constr.body) - rhs)
+                    #  + MindtPy.MindtPy_linear_cuts.slack_vars[
+                    # solve_data.nlp_iter,
+                    # MindtPy.nl_map[constr]]
+                     <= 0)
+
+        # MindtPy.ECP_constr_map[constr, solve_data.mip_iter] = c
+
+
+def add_psc_cut(solve_data, config, nlp_feasible=True):
+    m = solve_data.working_model
+    MindtPy = m.MindtPy_utils
+
+    sign_adjust = 1 if MindtPy.obj.sense == minimize else -1
 
     For nonconvex problems, turn on 'config.add_slack'. Slack variables will
     always be used for nonlinear equality constraints.
